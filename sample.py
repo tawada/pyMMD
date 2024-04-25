@@ -222,8 +222,6 @@ def load_pmx(file_path):
     logger.info(f"{max_y=}, {min_y=}")
     logger.info(f"{max_z=}, {min_z=}")
 
-    print(len(verteces))
-    print(faces[0])
     max_x_from_face = max([max([verteces[face[i]].xyz[0] for i in range(3)]) for face in faces])
     min_x_from_face = min([min([verteces[face[i]].xyz[0] for i in range(3)]) for face in faces])
     max_y_from_face = max([max([verteces[face[i]].xyz[1] for i in range(3)]) for face in faces])
@@ -244,7 +242,7 @@ def load_pmx(file_path):
     for material in materials:
         m_faces = faces[m_idx_s:m_idx_s + material.num_face]
         m_idx_s += material.num_face
-        color = [int(c * 255) for c in material.edge_color[:3]]
+        color = [int(c * 255) for c in material.edge_color[2::-1]]
         if color == [0, 0, 0]:
             continue
         for face in m_faces:
