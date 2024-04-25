@@ -9,11 +9,6 @@ logger.setLevel(logging.INFO)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
-def utf16codepoints_to_str(ns):
-    bs = b''.join([n.to_bytes(2, byteorder="big") for n in ns])
-    s = bs.decode('utf_16_be')
-    return s
-
 @dataclasses.dataclass
 class Vertex:
     xyz: list[float]
