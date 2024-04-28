@@ -133,6 +133,7 @@ def load_pmx(file_path):
             faces.append(face)
 
         # テクスチャ情報
+        textures = []
         texture_count = int.from_bytes(file.read(4), "little")
         logger.info(f"{texture_count=}")
         for i in range(texture_count):
@@ -140,6 +141,8 @@ def load_pmx(file_path):
             logger.info(f"{size_texture=}")
             texture = encode(file.read(size_texture))
             logger.info(f"{texture=}")
+            path = "/".join(file_path.split("/")[:-1])
+            textures.append(cv2.imread("./models/" + path + "/" + texture))
 
         # マテリアル情報
         material_count = int.from_bytes(file.read(4), "little")
@@ -224,14 +227,20 @@ def load_pmx(file_path):
     logger.info(f"{max_x_from_face=}, {min_x_from_face=}")
     logger.info(f"{max_y_from_face=}, {min_y_from_face=}")
 
-    img = np.array([[0, 0, 0] for _ in range(512 * 512)], dtype=np.uint8).reshape(512, 512, 3)
+    W = 384
+    H = 512
+    img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.uint8).reshape(H, W, 3)
+    t_img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.float32).reshape(H, W, 3)
+    t_imgs = []
 
     def convert_x(x):
-        return int((x - min_x) / (max_x - min_x) * 511)
+        return int((x - min_x) / (max_x - min_x) * (W - 1))
     def convert_y(y):
-        return 511 - int((y - min_y) / (max_y - min_y) * 511)
+        return H - 1 - int((y - min_y) / (max_y - min_y) * (H - 1))
     def convert_z(z):
         return int((z - min_z) / (max_z - min_z) * 511)
+
+    z_face_materials: tuple[int, list[int], Material] = []
 
     m_idx_s = 0
     for material in materials:
@@ -240,15 +249,60 @@ def load_pmx(file_path):
         color = [int(c * 255) for c in material.edge_color[2::-1]]
         if color == [0, 0, 0]:
             continue
+        pts = []
         for face in m_faces:
-            for i in range(3 - 1):
-                x = convert_x(verteces[face[i]].xyz[0])
-                y = convert_y(verteces[face[i]].xyz[1])
-                z = convert_z(verteces[face[i]].xyz[2])
-                next_x = convert_x(verteces[face[(i + 1) % 3]].xyz[0])
-                next_y = convert_y(verteces[face[(i + 1) % 3]].xyz[1])
-                cv2.line(img, (x, y), (next_x, next_y), color, thickness=1, lineType=cv2.LINE_4)
+            # 面のz座標の平均を取る
+            average_z = sum([convert_z(verteces[face[i]].xyz[2]) for i in range(3)]) / 3
+            z_face_materials.append((average_z, face, material))
+            # for i in range(3):
+            #     x = convert_x(verteces[face[i]].xyz[0])
+            #     y = convert_y(verteces[face[i]].xyz[1])
+            #     z = convert_z(verteces[face[i]].xyz[2])
+            #     next_x = convert_x(verteces[face[(i + 1) % 3]].xyz[0])
+            #     next_y = convert_y(verteces[face[(i + 1) % 3]].xyz[1])
+            #     cv2.line(img, (x, y), (next_x, next_y), color, thickness=1, lineType=cv2.LINE_4)
+            # pts.append(np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32))
+            # cv2.fillConvexPoly(img, np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32), color)
+        # cv2.fillPoly(img, pts, color)
+    # zでsort
+    z_face_materials.sort(key=lambda x: -x[0])
 
+    # 面を描画
+    for z_face_color in z_face_materials:
+        face = z_face_color[1]
+        material = z_face_color[2]
+        color = [int(c * 255) for c in material.edge_color[2::-1]]
+        if color == [0, 0, 0]:
+            continue
+        for i in range(3):
+            x = convert_x(verteces[face[i]].xyz[0])
+            y = convert_y(verteces[face[i]].xyz[1])
+            next_x = convert_x(verteces[face[(i + 1) % 3]].xyz[0])
+            next_y = convert_y(verteces[face[(i + 1) % 3]].xyz[1])
+            cv2.line(img, (x, y), (next_x, next_y), color, thickness=1, lineType=cv2.LINE_4)
+        cv2.fillConvexPoly(img, np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32), color)
+
+        if material.texture_index != -1 and material.texture_index < len(textures):
+            texture = textures[material.texture_index]
+            # テクスチャ画像上の座標
+            src_pts_crop = np.array([[
+                int(verteces[face[i]].uv[0] * texture.shape[0]),
+                int(verteces[face[i]].uv[1] * texture.shape[1]),
+            ] for i in range(3)], np.float32)
+            # 3Dモデル上の座標
+            dst_pts_crop = np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.float32)
+            mat = cv2.getAffineTransform(src_pts_crop, dst_pts_crop)
+            # テクスチャ画像を変形したもの
+            # TODO: 変形後の画像が3Dモデル全体の領域を確保しているが、三角形のみの領域を確保するように変更する
+            affine_img = cv2.warpAffine(texture, mat, (W, H))
+            # テクスチャ画像の三角形部分だけを取り出す
+            mask = np.zeros_like(img, dtype=np.float32)
+            point = np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32)
+            cv2.fillConvexPoly(mask, point, (1.0, 1.0, 1.0), cv2.LINE_AA)
+            t_img = affine_img * mask + t_img * (1 - mask)
+
+    # なぜか色が反転するので1から引く
+    img = ((1 - t_img) * 255).astype(np.uint8)
     cv2.imwrite("./dst/output.png", img)
 
 
