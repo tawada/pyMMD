@@ -251,6 +251,12 @@ def load_pmx(file_path):
             continue
         pts = []
         for face in m_faces:
+            # 陰面除去のため法線方向を判別
+            v1 = np.array(verteces[face[1]].xyz) - np.array(verteces[face[0]].xyz)
+            v2 = np.array(verteces[face[2]].xyz) - np.array(verteces[face[0]].xyz)
+            normal = np.cross(v1, v2)
+            if np.dot(normal, np.array([0, 0, 1])) > 0:
+                continue
             # 面のz座標の平均を取る
             average_z = sum([convert_z(verteces[face[i]].xyz[2]) for i in range(3)]) / 3
             z_face_materials.append((average_z, face, material))
