@@ -247,8 +247,8 @@ def load_pmx(file_path):
         m_faces = faces[m_idx_s:m_idx_s + material.num_face]
         m_idx_s += material.num_face
         color = [int(c * 255) for c in material.edge_color[2::-1]]
-        if color == [0, 0, 0]:
-            continue
+        # if color == [0, 0, 0]:
+        #     continue
         pts = []
         for face in m_faces:
             # 陰面除去のため法線方向を判別
@@ -278,8 +278,8 @@ def load_pmx(file_path):
         face = z_face_color[1]
         material = z_face_color[2]
         color = [int(c * 255) for c in material.edge_color[2::-1]]
-        if color == [0, 0, 0]:
-            continue
+        # if color == [0, 0, 0]:
+        #    continue
         for i in range(3):
             x = convert_x(verteces[face[i]].xyz[0])
             y = convert_y(verteces[face[i]].xyz[1])
