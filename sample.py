@@ -210,6 +210,27 @@ def load_pmx(file_path):
 
 
     # 3D描画
+    W = 384
+    H = 512
+    img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.uint8).reshape(H, W, 3)
+    t_img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.float32).reshape(H, W, 3)
+
+    import math
+    # カメラの位置
+    pi = math.pi
+    theta = 0
+    look_forward = np.array([math.sin(theta), 0, math.cos(theta)])
+
+    # 倍率
+    scale = 20
+
+    # 投影後の座標
+    def convert_xyz(xyz):
+        # look_forwardの方向に投影する
+        # もしlook_forward=[0, 0, 1]なら、[x, y, z] -> [x * scale, y * scale, z]に変換
+        # もしlook_forward=[sin(theta), 0, cos(theta)]なら、[x, y, z] -> [x * scale * cos(theta) + z * scale * sin(theta), y * scale, z * scale * cos(theta) - x * scale * sin(theta)]に変換
+        return [xyz[0] * scale * look_forward[2] + xyz[2] * scale * look_forward[0], xyz[1] * scale, xyz[2] * scale * look_forward[2] - xyz[0] * scale * look_forward[0]]
+
     max_x = max([v.xyz[0] for v in verteces])
     min_x = min([v.xyz[0] for v in verteces])
     max_y = max([v.xyz[1] for v in verteces])
@@ -227,11 +248,6 @@ def load_pmx(file_path):
     logger.info(f"{max_x_from_face=}, {min_x_from_face=}")
     logger.info(f"{max_y_from_face=}, {min_y_from_face=}")
 
-    W = 384
-    H = 512
-    img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.uint8).reshape(H, W, 3)
-    t_img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.float32).reshape(H, W, 3)
-    t_imgs = []
 
     def convert_x(x):
         return int((x - min_x) / (max_x - min_x) * (W - 1))
@@ -240,7 +256,7 @@ def load_pmx(file_path):
     def convert_z(z):
         return int((z - min_z) / (max_z - min_z) * 511)
 
-    z_face_materials: tuple[int, list[int], Material] = []
+    z_face_materials: tuple[float, list[int], Material] = []
 
     m_idx_s = 0
     for material in materials:
@@ -251,14 +267,15 @@ def load_pmx(file_path):
         #     continue
         pts = []
         for face in m_faces:
+            xyzs = [convert_xyz(verteces[face[i]].xyz) for i in range(3)]
             # 陰面除去のため法線方向を判別
-            v1 = np.array(verteces[face[1]].xyz) - np.array(verteces[face[0]].xyz)
-            v2 = np.array(verteces[face[2]].xyz) - np.array(verteces[face[0]].xyz)
+            v1 = np.array(xyzs[1]) - np.array(xyzs[0])
+            v2 = np.array(xyzs[2]) - np.array(xyzs[0])
             normal = np.cross(v1, v2)
             if np.dot(normal, np.array([0, 0, 1])) > 0:
                 continue
             # 面のz座標の平均を取る
-            average_z = sum([convert_z(verteces[face[i]].xyz[2]) for i in range(3)]) / 3
+            average_z = sum([xyzs[i][2] for i in range(3)]) / 3
             z_face_materials.append((average_z, face, material))
             # for i in range(3):
             #     x = convert_x(verteces[face[i]].xyz[0])
@@ -278,38 +295,54 @@ def load_pmx(file_path):
         face = z_face_color[1]
         material = z_face_color[2]
         color = [int(c * 255) for c in material.edge_color[2::-1]]
-        # if color == [0, 0, 0]:
-        #    continue
+        xyzs = np.array([convert_xyz(verteces[face[i]].xyz) for i in range(3)])
+        # xyzs[:][0] =  xyzs[:][0] + W // 2
+        # xyzs[:][1] = H - xyzs[:][1]
         for i in range(3):
-            x = convert_x(verteces[face[i]].xyz[0])
-            y = convert_y(verteces[face[i]].xyz[1])
-            next_x = convert_x(verteces[face[(i + 1) % 3]].xyz[0])
-            next_y = convert_y(verteces[face[(i + 1) % 3]].xyz[1])
+            x = xyzs[i][0]
+            y = xyzs[i][1]
+            next_x = xyzs[(i + 1) % 3][0]
+            next_y = xyzs[(i + 1) % 3][1]
+            # x += W // 2
+            # next_x += W // 2
+            # y = H - y
+            # next_y = H - next_y
+            if x == next_x and y == next_y:
+                continue
+            if x < 0 or y < 0 or next_x < 0 or next_y < 0:
+                continue
+            x, y, next_x, next_y = int(x), int(y), int(next_x), int(next_y)
             cv2.line(img, (x, y), (next_x, next_y), color, thickness=1, lineType=cv2.LINE_4)
-        cv2.fillConvexPoly(img, np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32), color)
+        # position = np.array([list(map(int, xyzs[i]))[:2] for i in range(3)], np.int32)
+        # cv2.fillConvexPoly(t_img, position, color)
+        # cv2.fillConvexPoly(img, np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32), color)
 
         if material.texture_index != -1 and material.texture_index < len(textures):
             texture = textures[material.texture_index]
+            xyzs = [convert_xyz(verteces[face[i]].xyz) for i in range(3)]
             # テクスチャ画像上の座標
             src_pts_crop = np.array([[
                 int(verteces[face[i]].uv[0] * texture.shape[0]),
                 int(verteces[face[i]].uv[1] * texture.shape[1]),
             ] for i in range(3)], np.float32)
             # 3Dモデル上の座標
-            dst_pts_crop = np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.float32)
+            dst_pts_crop = np.array([[int(xyzs[i][0]), int(xyzs[i][1])] for i in range(3)], np.float32)
+            dst_pts_crop[:][0] = dst_pts_crop[:][0] + 10
+            # dst_pts_crop[:][1] = H - dst_pts_crop[:][1]
             mat = cv2.getAffineTransform(src_pts_crop, dst_pts_crop)
             # テクスチャ画像を変形したもの
             # TODO: 変形後の画像が3Dモデル全体の領域を確保しているが、三角形のみの領域を確保するように変更する
             affine_img = cv2.warpAffine(texture, mat, (W, H))
             # テクスチャ画像の三角形部分だけを取り出す
             mask = np.zeros_like(img, dtype=np.float32)
-            point = np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32)
+            point = np.array(dst_pts_crop, np.int32)
             cv2.fillConvexPoly(mask, point, (1.0, 1.0, 1.0), cv2.LINE_AA)
             t_img = affine_img * mask + t_img * (1 - mask)
 
     # なぜか色が反転するので1から引く
-    img = ((1 - t_img) * 255).astype(np.uint8)
-    cv2.imwrite("./dst/output.png", img)
+    # img = ((1 - t_img) * 255).astype(np.uint8)
+    import datetime
+    cv2.imwrite("./dst/output-{}.png".format(datetime.datetime.now().strftime("%Y%m%d-%H%M")), img)
 
 
 file_path = input()
