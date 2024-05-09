@@ -3,6 +3,7 @@ import dataclasses
 import logging
 import numpy as np
 import struct
+import math
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -39,6 +40,9 @@ class Material:
 
 verteces = []
 materials = []
+faces = [] 
+textures = []
+
 
 def load_pmx(file_path):
     with open("models/" + file_path, 'rb') as file:
@@ -125,7 +129,6 @@ def load_pmx(file_path):
             verteces.append(vertex)
 
         # 面情報
-        faces = [] 
         face_count = int.from_bytes(file.read(4), "little") // 3
         logger.info(f"{face_count=}")
         for i in range(face_count):
@@ -133,7 +136,6 @@ def load_pmx(file_path):
             faces.append(face)
 
         # テクスチャ情報
-        textures = []
         texture_count = int.from_bytes(file.read(4), "little")
         logger.info(f"{texture_count=}")
         for i in range(texture_count):
@@ -208,17 +210,18 @@ def load_pmx(file_path):
                 num_face=num_face,
             ))
 
+    for theta in range(0, 360, 30):
+        save_image(theta * np.pi / 180)
 
+
+def save_image(theta):
     # 3D描画
     W = 384
     H = 512
     img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.uint8).reshape(H, W, 3)
     t_img = np.array([[0, 0, 0] for _ in range(W * H)], dtype=np.float32).reshape(H, W, 3)
 
-    import math
     # カメラの位置
-    pi = math.pi
-    theta = 0
     look_forward = np.array([math.sin(theta), 0, math.cos(theta)])
 
     # 倍率
@@ -296,8 +299,9 @@ def load_pmx(file_path):
         material = z_face_color[2]
         color = [int(c * 255) for c in material.edge_color[2::-1]]
         xyzs = np.array([convert_xyz(verteces[face[i]].xyz) for i in range(3)])
-        # xyzs[:][0] =  xyzs[:][0] + W // 2
-        # xyzs[:][1] = H - xyzs[:][1]
+        for xyz in xyzs:
+            xyz[0] = xyz[0] + W // 2
+            xyz[1] = H - xyz[1]
         for i in range(3):
             x = xyzs[i][0]
             y = xyzs[i][1]
@@ -312,7 +316,7 @@ def load_pmx(file_path):
             if x < 0 or y < 0 or next_x < 0 or next_y < 0:
                 continue
             x, y, next_x, next_y = int(x), int(y), int(next_x), int(next_y)
-            cv2.line(img, (x, y), (next_x, next_y), color, thickness=1, lineType=cv2.LINE_4)
+            # cv2.line(img, (x, y), (next_x, next_y), color, thickness=1, lineType=cv2.LINE_4)
         # position = np.array([list(map(int, xyzs[i]))[:2] for i in range(3)], np.int32)
         # cv2.fillConvexPoly(t_img, position, color)
         # cv2.fillConvexPoly(img, np.array([[convert_x(verteces[face[i]].xyz[0]), convert_y(verteces[face[i]].xyz[1])] for i in range(3)], np.int32), color)
@@ -327,7 +331,10 @@ def load_pmx(file_path):
             ] for i in range(3)], np.float32)
             # 3Dモデル上の座標
             dst_pts_crop = np.array([[int(xyzs[i][0]), int(xyzs[i][1])] for i in range(3)], np.float32)
-            dst_pts_crop[:][0] = dst_pts_crop[:][0] + 10
+            for dst_pt in dst_pts_crop:
+                dst_pt[0] = dst_pt[0] + W // 2
+                dst_pt[1] = H - dst_pt[1]
+            # dst_pts_crop[:][0] = dst_pts_crop[:][0] + 10
             # dst_pts_crop[:][1] = H - dst_pts_crop[:][1]
             mat = cv2.getAffineTransform(src_pts_crop, dst_pts_crop)
             # テクスチャ画像を変形したもの
@@ -340,7 +347,7 @@ def load_pmx(file_path):
             t_img = affine_img * mask + t_img * (1 - mask)
 
     # なぜか色が反転するので1から引く
-    # img = ((1 - t_img) * 255).astype(np.uint8)
+    img = ((1 - t_img) * 255).astype(np.uint8)
     import datetime
     cv2.imwrite("./dst/output-{}.png".format(datetime.datetime.now().strftime("%Y%m%d-%H%M")), img)
 
