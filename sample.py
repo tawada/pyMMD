@@ -1,9 +1,11 @@
 import cv2
 import dataclasses
+import datetime
 import logging
 import numpy as np
 import struct
 import math
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -42,6 +44,7 @@ verteces = []
 materials = []
 faces = [] 
 textures = []
+filenames = []
 
 
 def load_pmx(file_path):
@@ -212,6 +215,7 @@ def load_pmx(file_path):
 
     for theta in range(0, 360, 30):
         save_image(theta * np.pi / 180)
+    save_gif()
 
 
 def save_image(theta):
@@ -330,26 +334,45 @@ def save_image(theta):
                 int(verteces[face[i]].uv[1] * texture.shape[1]),
             ] for i in range(3)], np.float32)
             # 3Dモデル上の座標
-            dst_pts_crop = np.array([[int(xyzs[i][0]), int(xyzs[i][1])] for i in range(3)], np.float32)
+            dst_pts_crop = np.array([[int(xyzs[i][0]), int(xyzs[i][1])] for i in range(3)], np.int32)
             for dst_pt in dst_pts_crop:
                 dst_pt[0] = dst_pt[0] + W // 2
                 dst_pt[1] = H - dst_pt[1]
-            # dst_pts_crop[:][0] = dst_pts_crop[:][0] + 10
-            # dst_pts_crop[:][1] = H - dst_pts_crop[:][1]
-            mat = cv2.getAffineTransform(src_pts_crop, dst_pts_crop)
+            min_x = min([dst_pt[0] for dst_pt in dst_pts_crop])
+            max_x = max([dst_pt[0] for dst_pt in dst_pts_crop])
+            min_y = min([dst_pt[1] for dst_pt in dst_pts_crop])
+            max_y = max([dst_pt[1] for dst_pt in dst_pts_crop])
+            # 三角形の領域を取得
+            mini_dst_pts_crop = np.array([[dst_pt[0] - min_x, dst_pt[1] - min_y] for dst_pt in dst_pts_crop], np.float32)
+
+            mat = cv2.getAffineTransform(src_pts_crop, mini_dst_pts_crop)
             # テクスチャ画像を変形したもの
             # TODO: 変形後の画像が3Dモデル全体の領域を確保しているが、三角形のみの領域を確保するように変更する
-            affine_img = cv2.warpAffine(texture, mat, (W, H))
+            # affine_img = cv2.warpAffine(texture, mat, (W, H))
+            size = (max_x - min_x, max_y - min_y)
+            if size[0] == 0 or size[1] == 0:
+                continue
+            affine_img = cv2.warpAffine(texture, mat, size)
             # テクスチャ画像の三角形部分だけを取り出す
-            mask = np.zeros_like(img, dtype=np.float32)
-            point = np.array(dst_pts_crop, np.int32)
+            # mask = np.zeros_like(img, dtype=np.float32)
+            mask = np.zeros_like(affine_img, dtype=np.float32)
+            # point = np.array(dst_pts_crop, np.int32)
+            point = np.array(mini_dst_pts_crop, np.int32)
             cv2.fillConvexPoly(mask, point, (1.0, 1.0, 1.0), cv2.LINE_AA)
-            t_img = affine_img * mask + t_img * (1 - mask)
+            # t_img = affine_img * mask + t_img * (1 - mask)
+            t_img[min_y:max_y, min_x:max_x] = affine_img * mask + t_img[min_y:max_y, min_x:max_x] * (1 - mask)
 
     # なぜか色が反転するので1から引く
     img = ((1 - t_img) * 255).astype(np.uint8)
-    import datetime
-    cv2.imwrite("./dst/output-{}.png".format(datetime.datetime.now().strftime("%Y%m%d-%H%M")), img)
+    filename = "./dst/output-{}.png".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    filenames.append(filename)
+    cv2.imwrite(filename, img)
+
+
+def save_gif():
+    images = [Image.open(filename) for filename in filenames]
+    filename = "./dst/output-{}.gif".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    images[0].save(filename, save_all=True, append_images=images[1:], duration=100, loop=0)
 
 
 file_path = input()
