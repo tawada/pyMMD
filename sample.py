@@ -229,7 +229,7 @@ def save_image(theta):
     look_forward = np.array([math.sin(theta), 0, math.cos(theta)])
 
     # 倍率
-    scale = 20
+    scale = 25
 
     # 投影後の座標
     def convert_xyz(xyz):
@@ -238,31 +238,7 @@ def save_image(theta):
         # もしlook_forward=[sin(theta), 0, cos(theta)]なら、[x, y, z] -> [x * scale * cos(theta) + z * scale * sin(theta), y * scale, z * scale * cos(theta) - x * scale * sin(theta)]に変換
         return [xyz[0] * scale * look_forward[2] + xyz[2] * scale * look_forward[0], xyz[1] * scale, xyz[2] * scale * look_forward[2] - xyz[0] * scale * look_forward[0]]
 
-    max_x = max([v.xyz[0] for v in verteces])
-    min_x = min([v.xyz[0] for v in verteces])
-    max_y = max([v.xyz[1] for v in verteces])
-    min_y = min([v.xyz[1] for v in verteces])
-    max_z = max([v.xyz[2] for v in verteces])
-    min_z = min([v.xyz[2] for v in verteces])
-    logger.info(f"{max_x=}, {min_x=}")
-    logger.info(f"{max_y=}, {min_y=}")
-    logger.info(f"{max_z=}, {min_z=}")
-
-    max_x_from_face = max([max([verteces[face[i]].xyz[0] for i in range(3)]) for face in faces])
-    min_x_from_face = min([min([verteces[face[i]].xyz[0] for i in range(3)]) for face in faces])
-    max_y_from_face = max([max([verteces[face[i]].xyz[1] for i in range(3)]) for face in faces])
-    min_y_from_face = min([min([verteces[face[i]].xyz[1] for i in range(3)]) for face in faces])
-    logger.info(f"{max_x_from_face=}, {min_x_from_face=}")
-    logger.info(f"{max_y_from_face=}, {min_y_from_face=}")
-
-
-    def convert_x(x):
-        return int((x - min_x) / (max_x - min_x) * (W - 1))
-    def convert_y(y):
-        return H - 1 - int((y - min_y) / (max_y - min_y) * (H - 1))
-    def convert_z(z):
-        return int((z - min_z) / (max_z - min_z) * 511)
-
+    # 画像座標
     z_face_materials: tuple[float, list[int], Material] = []
 
     m_idx_s = 0
@@ -360,7 +336,41 @@ def save_image(theta):
             point = np.array(mini_dst_pts_crop, np.int32)
             cv2.fillConvexPoly(mask, point, (1.0, 1.0, 1.0), cv2.LINE_AA)
             # t_img = affine_img * mask + t_img * (1 - mask)
-            t_img[min_y:max_y, min_x:max_x] = affine_img * mask + t_img[min_y:max_y, min_x:max_x] * (1 - mask)
+            # maskが描画領域を飛び出す場合があるので、範囲を制限する
+            backup_max_x = max_x
+            backup_max_y = max_y
+            backup_min_x = min_x
+            backup_min_y = min_y
+            if max_x >= W:
+                max_x = W - 1
+                if min_x >= W:
+                    continue
+            if max_y >= H:
+                max_y = H - 1
+                if min_y >= H:
+                    continue
+            mask = mask[:max_y - min_y, :max_x - min_x]
+            affine_img = affine_img[:max_y - min_y, :max_x - min_x]
+
+            if min_x < 0:
+                if max_x <= 0:
+                    continue
+                mask = mask[:, -min_x:- min_x + max_x]
+                affine_img = affine_img[:, -min_x:- min_x + max_x]
+                min_x = 0
+            if min_y < 0:
+                if max_y <= 0:
+                    continue
+                mask = mask[-min_y:-min_y + max_y, :]
+                affine_img = affine_img[-min_y: -min_y + max_y, :]
+                min_y = 0
+            try:
+                t_img[min_y:max_y, min_x:max_x] = affine_img * mask + t_img[min_y:max_y, min_x:max_x] * (1 - mask)
+            except Exception as e:
+                print(e)
+                print(backup_max_x, backup_min_x, backup_max_y, backup_min_y)
+                print(max_x, min_x, max_y, min_y)
+                print(affine_img.shape, mask.shape, t_img.shape)
 
     # なぜか色が反転するので1から引く
     img = ((1 - t_img) * 255).astype(np.uint8)
@@ -372,7 +382,7 @@ def save_image(theta):
 def save_gif():
     images = [Image.open(filename) for filename in filenames]
     filename = "./dst/output-{}.gif".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
-    images[0].save(filename, save_all=True, append_images=images[1:], duration=100, loop=0)
+    images[0].save(filename, save_all=True, append_images=images[1:], duration=10, loop=0)
 
 
 file_path = input()
